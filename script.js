@@ -54,7 +54,10 @@ function initializeEventListeners() {
     elements.fileUploadArea.addEventListener('dragover', handleDragOver);
     elements.fileUploadArea.addEventListener('drop', handleFileDrop);
     elements.fileUploadArea.addEventListener('dragleave', handleDragLeave);
-    
+
+    // 尺寸选择变化
+    elements.size.addEventListener('change', handleSizeChange);
+
     // 生成按钮
     elements.generateBtn.addEventListener('click', generateImage);
 }
@@ -118,6 +121,11 @@ function processFiles(files) {
                 const imageData = e.target.result;
                 uploadedImages.push(imageData);
                 addImagePreview(imageData, uploadedImages.length - 1);
+
+                // 如果选择了自动尺寸，检测图片尺寸
+                if (elements.size.value === 'auto') {
+                    detectImageSize(imageData);
+                }
             };
             reader.readAsDataURL(file);
         }
@@ -150,6 +158,71 @@ function updateImagePreviews() {
     uploadedImages.forEach((imageSrc, index) => {
         addImagePreview(imageSrc, index);
     });
+}
+
+// 检测图片尺寸并自动选择最佳尺寸
+function detectImageSize(imageSrc) {
+    const img = new Image();
+    img.onload = function() {
+        const width = img.width;
+        const height = img.height;
+        const maxDimension = Math.max(width, height);
+
+        console.log(`检测到图片尺寸: ${width}x${height}`);
+
+        // 根据图片最大尺寸选择最接近的API支持尺寸
+        let bestSize;
+        if (maxDimension <= 256) {
+            bestSize = '256x256';
+        } else if (maxDimension <= 512) {
+            bestSize = '512x512';
+        } else {
+            bestSize = '1024x1024';
+        }
+
+        // 更新尺寸选择器显示
+        updateAutoSizeDisplay(bestSize, width, height);
+
+        console.log(`自动选择尺寸: ${bestSize} (基于图片尺寸 ${width}x${height})`);
+    };
+    img.src = imageSrc;
+}
+
+// 更新自动尺寸显示
+function updateAutoSizeDisplay(selectedSize, originalWidth, originalHeight) {
+    const sizeSelect = elements.size;
+    const autoOption = sizeSelect.querySelector('option[value="auto"]');
+
+    if (autoOption) {
+        autoOption.textContent = `自动 (${selectedSize}) - 原图: ${originalWidth}x${originalHeight}`;
+        // 存储实际选择的尺寸，用于API调用
+        autoOption.dataset.actualSize = selectedSize;
+    }
+}
+
+// 处理尺寸选择变化
+function handleSizeChange() {
+    const selectedValue = elements.size.value;
+
+    if (selectedValue === 'auto') {
+        // 如果选择了自动，但还没有上传图片，提示用户
+        if (uploadedImages.length === 0) {
+            const autoOption = elements.size.querySelector('option[value="auto"]');
+            if (autoOption) {
+                autoOption.textContent = '自动 (请先上传图片)';
+            }
+        } else {
+            // 重新检测第一张图片的尺寸
+            detectImageSize(uploadedImages[0]);
+        }
+    } else {
+        // 重置自动选项的显示
+        const autoOption = elements.size.querySelector('option[value="auto"]');
+        if (autoOption) {
+            autoOption.textContent = '自动 (根据上传图片)';
+            delete autoOption.dataset.actualSize;
+        }
+    }
 }
 
 // 生成图像
@@ -197,11 +270,18 @@ async function generateImage() {
 
 // 构建请求数据
 function buildRequestData(prompt) {
+    // 处理尺寸选择
+    let actualSize = elements.size.value;
+    if (actualSize === 'auto') {
+        const autoOption = elements.size.querySelector('option[value="auto"]');
+        actualSize = autoOption?.dataset.actualSize || '512x512'; // 默认值
+    }
+
     const data = {
         model: elements.model.value,
         prompt: prompt,
         n: parseInt(elements.numImages.value),
-        size: elements.size.value,
+        size: actualSize,
         response_format: 'url',
         guidance_scale: parseFloat(elements.guidanceScale.value),
         num_inference_steps: parseInt(elements.steps.value),
