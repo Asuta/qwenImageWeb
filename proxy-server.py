@@ -69,7 +69,39 @@ class CORSProxyHandler(http.server.BaseHTTPRequestHandler):
                 self._send_error(400, f"Invalid JSON: {str(e)}")
                 return
             
-            print(f"Received request: {json.dumps(request_data, indent=2)}")
+            # 检查是否包含图片数据
+            has_image_data = False
+            image_info = []
+
+            if 'imageDataUrl' in request_data:
+                has_image_data = True
+                image_info.append(f"imageDataUrl: {len(request_data['imageDataUrl'])} 字符")
+
+            if 'imageDataUrls' in request_data:
+                has_image_data = True
+                image_info.append(f"imageDataUrls: {len(request_data['imageDataUrls'])} 张图片")
+                for i, img in enumerate(request_data['imageDataUrls']):
+                    image_info.append(f"  图片{i+1}: {len(img)} 字符")
+
+            if 'maskDataUrl' in request_data:
+                has_image_data = True
+                image_info.append(f"maskDataUrl: {len(request_data['maskDataUrl'])} 字符")
+
+            print("=" * 60)
+            print(f"📥 收到API请求:")
+            print(f"模型: {request_data.get('model', 'N/A')}")
+            print(f"提示词: {request_data.get('prompt', 'N/A')[:50]}...")
+            print(f"图片数量: {request_data.get('n', 'N/A')}")
+            print(f"尺寸: {request_data.get('size', 'N/A')}")
+
+            if has_image_data:
+                print("🖼️  包含图片数据:")
+                for info in image_info:
+                    print(f"   {info}")
+            else:
+                print("❌ 未包含图片数据")
+
+            print("=" * 60)
             
             # 构建发送到NanoGPT API的请求
             api_url = f"{NANOGPT_API_BASE}/v1/images/generations"

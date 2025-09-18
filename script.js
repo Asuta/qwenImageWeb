@@ -207,14 +207,35 @@ function buildRequestData(prompt) {
         num_inference_steps: parseInt(elements.steps.value),
         strength: parseFloat(elements.strength.value)
     };
-    
+
+    // 检查上传的图片
+    console.log('='.repeat(60));
+    console.log('📤 构建API请求数据:');
+    console.log(`模型: ${data.model}`);
+    console.log(`提示词: ${data.prompt.substring(0, 50)}...`);
+    console.log(`图片数量: ${data.n}`);
+    console.log(`尺寸: ${data.size}`);
+    console.log(`上传的图片数组长度: ${uploadedImages.length}`);
+
     // 添加图片数据
     if (uploadedImages.length === 1) {
         data.imageDataUrl = uploadedImages[0];
+        console.log('🖼️  添加单张图片数据:');
+        console.log(`   imageDataUrl: ${uploadedImages[0].length} 字符`);
+        console.log(`   图片格式: ${uploadedImages[0].substring(0, 30)}...`);
     } else if (uploadedImages.length > 1) {
         data.imageDataUrls = uploadedImages;
+        console.log('🖼️  添加多张图片数据:');
+        console.log(`   imageDataUrls: ${uploadedImages.length} 张图片`);
+        uploadedImages.forEach((img, i) => {
+            console.log(`   图片${i+1}: ${img.length} 字符`);
+        });
+    } else {
+        console.log('❌ 未上传图片');
     }
-    
+
+    console.log('='.repeat(60));
+
     return data;
 }
 
