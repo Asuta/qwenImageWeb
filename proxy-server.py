@@ -15,6 +15,7 @@ import webbrowser
 import os
 import sys
 from pathlib import Path
+import concurrent.futures
 
 # 设置端口
 PORT = 8001
@@ -105,44 +106,97 @@ class CORSProxyHandler(http.server.BaseHTTPRequestHandler):
             
             # 构建发送到NanoGPT API的请求
             api_url = f"{NANOGPT_API_BASE}/v1/images/generations"
-            
+
+            # 目标数量（兼容多种字段）
+            desired_n = request_data.get('n') or request_data.get('num_images') or request_data.get('numImages') or 1
+            try:
+                desired_n = int(desired_n)
+            except Exception:
+                desired_n = 1
+
             # 准备请求头
             headers = {
                 'Authorization': f'Bearer {API_KEY}',
                 'Content-Type': 'application/json',
                 'User-Agent': 'CORS-Proxy/1.0'
             }
-            
-            # 准备请求数据
-            api_request_data = json.dumps(request_data).encode('utf-8')
-            
-            # 创建请求
-            req = urllib.request.Request(
-                api_url,
-                data=api_request_data,
-                headers=headers,
-                method='POST'
-            )
-            
+
+            def call_upstream(single_payload):
+                payload_bytes = json.dumps(single_payload).encode('utf-8')
+                req = urllib.request.Request(
+                    api_url,
+                    data=payload_bytes,
+                    headers=headers,
+                    method='POST'
+                )
+                with urllib.request.urlopen(req, timeout=120) as resp:
+                    raw = resp.read()
+                    return json.loads(raw.decode('utf-8'))
+
             print(f"Sending request to: {api_url}")
             print(f"Request headers: {headers}")
-            
-            # 发送请求
+
             try:
-                with urllib.request.urlopen(req, timeout=120) as response:
-                    response_data = response.read()
-                    response_json = json.loads(response_data.decode('utf-8'))
-                    
-                    print(f"API Response: {json.dumps(response_json, indent=2)}")
-                    
-                    # 发送成功响应
+                if desired_n <= 1:
+                    # 直接转发一次
+                    upstream_resp = call_upstream(request_data)
+                    print(f"API Response: {json.dumps(upstream_resp, indent=2)}")
+
                     self.send_response(200)
                     self._set_cors_headers()
                     self.send_header('Content-Type', 'application/json')
                     self.end_headers()
-                    
-                    self.wfile.write(response_data)
-                    
+                    self.wfile.write(json.dumps(upstream_resp).encode('utf-8'))
+                else:
+                    # 上游可能不支持批量：并发 fan-out 聚合
+                    print(f"Fan-out to upstream for {desired_n} images ...")
+                    base_payload = dict(request_data)
+                    base_payload['n'] = 1
+                    base_payload['nImages'] = 1
+                    base_payload['numImages'] = 1
+
+                    tasks = [dict(base_payload) for _ in range(desired_n)]
+                    results = []
+                    errors = []
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=min(4, desired_n)) as executor:
+                        futures = [executor.submit(call_upstream, t) for t in tasks]
+                        for f in concurrent.futures.as_completed(futures):
+                            try:
+                                results.append(f.result())
+                            except Exception as ex:
+                                errors.append(str(ex))
+
+                    # 聚合 data
+                    combined = {
+                        'data': [],
+                    }
+                    total_cost = 0.0
+                    last_balance = None
+                    for r in results:
+                        if isinstance(r, dict):
+                            if isinstance(r.get('data'), list):
+                                combined['data'].extend(r['data'])
+                            # 可选费用字段
+                            if isinstance(r.get('cost'), (int, float)):
+                                total_cost += float(r['cost'])
+                            if r.get('remainingBalance') is not None:
+                                last_balance = r.get('remainingBalance')
+
+                    if total_cost:
+                        combined['cost'] = total_cost
+                    if last_balance is not None:
+                        combined['remainingBalance'] = last_balance
+                    if errors:
+                        combined['warnings'] = {'partialErrors': errors}
+
+                    print(f"Aggregated {len(combined['data'])} images from {len(results)} upstream calls")
+
+                    self.send_response(200)
+                    self._set_cors_headers()
+                    self.send_header('Content-Type', 'application/json')
+                    self.end_headers()
+                    self.wfile.write(json.dumps(combined).encode('utf-8'))
+
             except urllib.error.HTTPError as e:
                 error_data = e.read().decode('utf-8')
                 print(f"API Error {e.code}: {error_data}")

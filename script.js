@@ -267,13 +267,30 @@ async function generateImage() {
     try {
         const requestData = buildRequestData(prompt);
         const response = await callImageGenerationAPI(requestData);
-        
-        if (response.data && response.data.length > 0) {
-            displayResults(response.data, response);
-        } else {
-            throw new Error('API返回的数据格式不正确');
+
+        // 兼容不同提供商返回结构，提取所有图片
+        let images = extractImagesFromResponse(response);
+        console.log(`✅ 解析到图片数量: ${images.length}`);
+
+        // 如果后端未支持批量，自动补齐到目标数量
+        const desired = parseInt(elements.numImages.value);
+        if (images.length < desired) {
+            console.log(`ℹ️ 后端仅返回 ${images.length}/${desired}，将通过前端补齐...`);
+            const remain = Math.max(0, desired - images.length);
+            const extraBodies = Array.from({ length: remain }, () => ({ ...requestData, n: 1, num_images: 1, numImages: 1 }));
+            const extraCalls = extraBodies.map(body => callImageGenerationAPI(body).then(extractImagesFromResponse).catch(err => { console.warn('补齐请求失败:', err); return []; }));
+            const extraResults = await Promise.all(extraCalls);
+            const extraImages = extraResults.flat();
+            images = images.concat(extraImages).slice(0, desired);
+            console.log(`✅ 最终将展示图片数量: ${images.length}`);
         }
-        
+
+        if (images.length > 0) {
+            displayResults(images, response);
+        } else {
+            throw new Error('API返回的数据中未找到图片');
+        }
+
     } catch (error) {
         console.error('生成图像失败:', error);
         showError(error.message || '生成图像时发生错误，请稍后重试');
@@ -304,6 +321,10 @@ function buildRequestData(prompt) {
         strength: parseFloat(elements.strength.value)
     };
 
+    // 兼容不同平台的数量参数写法
+    data.num_images = data.n;
+    data.numImages = data.n;
+
     // 检查上传的图片
     console.log('='.repeat(60));
     console.log('📤 构建API请求数据:');
@@ -333,6 +354,42 @@ function buildRequestData(prompt) {
     console.log('='.repeat(60));
 
     return data;
+}
+
+// 从各种可能的响应结构中提取图片数组
+function extractImagesFromResponse(response) {
+    // 常见结构: { data: [ { url }, { url } ] }
+    if (Array.isArray(response?.data)) {
+        const arr = response.data;
+        // 如果是字符串数组，转成对象数组
+        if (arr.length > 0 && typeof arr[0] === 'string') {
+            return arr.map((u) => ({ url: u }));
+        }
+        // 如果是对象数组，且对象内含 images，再展开
+        if (arr.length > 0 && arr[0] && Array.isArray(arr[0].images)) {
+            return arr.flatMap((item) => {
+                return item.images.map((img) => (typeof img === 'string' ? { url: img } : img));
+            });
+        }
+        return arr;
+    }
+
+    // 其他可能: { images: [...] }
+    if (Array.isArray(response?.images)) {
+        return response.images.map((img) => (typeof img === 'string' ? { url: img } : img));
+    }
+
+    // 其他可能: { data: { images: [...] } }
+    if (response?.data && Array.isArray(response.data.images)) {
+        return response.data.images.map((img) => (typeof img === 'string' ? { url: img } : img));
+    }
+
+    // 兜底: 如果存在单一 url 或 b64_json
+    if (response?.url || response?.b64_json) {
+        return [response];
+    }
+
+    return [];
 }
 
 // 调用API
