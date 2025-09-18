@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>图像生成 AI 工具</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <h1><i class="fas fa-magic"></i> 图像生成 AI 工具</h1>
+            <p>使用 AI 技术根据文本描述生成精美图像</p>
+        </header>
+
+        <main class="main-content">
+            <!-- 输入区域 -->
+            <div class="input-section">
+                <div class="form-group">
+                    <label for="prompt">
+                        <i class="fas fa-pen"></i> 图像描述 (必填)
+                    </label>
+                    <textarea
+                        id="prompt"
+                        placeholder="请详细描述您想要生成的图像，例如：一只可爱的橙色小猫坐在花园里，阳光明媚，卡通风格"
+                        rows="4"
+                        required
+                    ></textarea>
+                    <div class="prompt-examples">
+                        <small><strong>示例描述：</strong></small>
+                        <div class="example-tags">
+                            <span class="example-tag" onclick="setPromptExample(this)">一只可爱的橙色小猫坐在花园里，阳光明媚，卡通风格</span>
+                            <span class="example-tag" onclick="setPromptExample(this)">未来科技城市夜景，霓虹灯闪烁，赛博朋克风格</span>
+                            <span class="example-tag" onclick="setPromptExample(this)">中国传统山水画，水墨风格，远山如黛，云雾缭绕</span>
+                            <span class="example-tag" onclick="setPromptExample(this)">宇宙中的星云，色彩绚烂，梦幻般的太空景象</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="referenceImage">
+                        <i class="fas fa-image"></i> 参考图片 (可选)
+                    </label>
+                    <div class="file-upload-area" id="fileUploadArea">
+                        <input type="file" id="referenceImage" accept="image/*" multiple>
+                        <div class="upload-placeholder">
+                            <i class="fas fa-cloud-upload-alt"></i>
+                            <p>点击选择图片或拖拽图片到此处</p>
+                            <small>支持 JPG、PNG 格式，可选择多张图片</small>
+                        </div>
+                        <div class="preview-container" id="previewContainer"></div>
+                    </div>
+                </div>
+
+                <!-- 高级设置 -->
+                <div class="advanced-settings">
+                    <button type="button" class="toggle-advanced" id="toggleAdvanced">
+                        <i class="fas fa-cog"></i> 高级设置
+                        <i class="fas fa-chevron-down"></i>
+                    </button>
+                    
+                    <div class="advanced-panel" id="advancedPanel">
+                        <div class="settings-grid">
+                            <div class="form-group">
+                                <label for="model">模型选择</label>
+                                <select id="model">
+                                    <option value="hidream">HiDream (默认)</option>
+                                    <option value="flux-kontext">Flux Kontext</option>
+                                    <option value="gpt-4o-image">GPT-4O Image</option>
+                                </select>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="size">图像尺寸</label>
+                                <select id="size">
+                                    <option value="512x512">512x512 (推荐)</option>
+                                    <option value="256x256">256x256</option>
+                                    <option value="1024x1024">1024x1024</option>
+                                </select>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="numImages">生成数量</label>
+                                <select id="numImages">
+                                    <option value="1">1张</option>
+                                    <option value="2">2张</option>
+                                    <option value="3">3张</option>
+                                    <option value="4">4张</option>
+                                </select>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="guidanceScale">引导强度: <span id="guidanceValue">7.5</span></label>
+                                <input type="range" id="guidanceScale" min="1" max="20" value="7.5" step="0.5">
+                                <small>数值越高，生成的图像越符合描述</small>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="steps">推理步数: <span id="stepsValue">30</span></label>
+                                <input type="range" id="steps" min="10" max="100" value="30" step="5">
+                                <small>步数越多，质量越高但耗时更长</small>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="strength">变化强度: <span id="strengthValue">0.8</span></label>
+                                <input type="range" id="strength" min="0.1" max="1" value="0.8" step="0.1">
+                                <small>仅在使用参考图片时有效</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <button type="button" class="generate-btn" id="generateBtn">
+                    <i class="fas fa-magic"></i>
+                    <span>生成图像</span>
+                </button>
+            </div>
+
+            <!-- 结果显示区域 -->
+            <div class="result-section" id="resultSection">
+                <div class="loading" id="loadingIndicator">
+                    <div class="spinner"></div>
+                    <p>AI 正在创作中，请稍候...</p>
+                </div>
+
+                <div class="result-content" id="resultContent">
+                    <!-- 生成的图像将在这里显示 -->
+                </div>
+
+                <div class="error-message" id="errorMessage">
+                    <!-- 错误信息将在这里显示 -->
+                </div>
+            </div>
+        </main>
+
+        <footer class="footer">
+            <p>&copy; 2024 图像生成 AI 工具 | 基于 NanoGPT API</p>
+        </footer>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
