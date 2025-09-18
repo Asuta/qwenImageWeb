@@ -166,37 +166,53 @@ function detectImageSize(imageSrc) {
     img.onload = function() {
         const width = img.width;
         const height = img.height;
-        const maxDimension = Math.max(width, height);
 
         console.log(`检测到图片尺寸: ${width}x${height}`);
 
-        // 根据图片最大尺寸选择最接近的API支持尺寸
-        let bestSize;
-        if (maxDimension <= 256) {
-            bestSize = '256x256';
-        } else if (maxDimension <= 512) {
-            bestSize = '512x512';
-        } else {
-            bestSize = '1024x1024';
-        }
+        // 计算宽高比
+        const aspectRatio = width / height;
+
+        // 使用原图的实际尺寸作为输出尺寸
+        const bestSize = `${width}x${height}`;
+        const reason = '使用原图实际尺寸';
 
         // 更新尺寸选择器显示
-        updateAutoSizeDisplay(bestSize, width, height);
+        updateAutoSizeDisplay(bestSize, width, height, aspectRatio, reason);
 
-        console.log(`自动选择尺寸: ${bestSize} (基于图片尺寸 ${width}x${height})`);
+        console.log(`自动选择尺寸: ${bestSize} (使用原图实际尺寸)`);
+        console.log(`原图信息: ${width}x${height}, 宽高比: ${aspectRatio.toFixed(2)}`);
     };
     img.src = imageSrc;
 }
 
 // 更新自动尺寸显示
-function updateAutoSizeDisplay(selectedSize, originalWidth, originalHeight) {
+function updateAutoSizeDisplay(selectedSize, originalWidth, originalHeight, aspectRatio, reason) {
     const sizeSelect = elements.size;
     const autoOption = sizeSelect.querySelector('option[value="auto"]');
 
     if (autoOption) {
-        autoOption.textContent = `自动 (${selectedSize}) - 原图: ${originalWidth}x${originalHeight}`;
-        // 存储实际选择的尺寸，用于API调用
+        // 判断图片形状
+        let shapeDesc = '';
+        if (aspectRatio >= 0.9 && aspectRatio <= 1.1) {
+            shapeDesc = '正方形';
+        } else if (aspectRatio > 1.1) {
+            shapeDesc = '横向';
+        } else {
+            shapeDesc = '纵向';
+        }
+
+        // 显示使用原图尺寸
+        autoOption.textContent = `自动 (${selectedSize}) - ${shapeDesc}`;
+
+        // 存储详细信息，用于API调用和调试
         autoOption.dataset.actualSize = selectedSize;
+        autoOption.dataset.originalWidth = originalWidth;
+        autoOption.dataset.originalHeight = originalHeight;
+        autoOption.dataset.aspectRatio = aspectRatio.toFixed(2);
+        autoOption.dataset.reason = reason;
+
+        // 设置工具提示显示详细信息
+        autoOption.title = `使用原图尺寸: ${originalWidth}x${originalHeight}\n宽高比: ${aspectRatio.toFixed(2)}\n形状: ${shapeDesc}`;
     }
 }
 
