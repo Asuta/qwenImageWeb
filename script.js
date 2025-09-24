@@ -1,9 +1,9 @@
 // API配置
 const API_CONFIG = {
-    // 使用本地代理服务器避免CORS问题
-    baseUrl: 'http://localhost:8001/api/images/generations',
-    // API密钥由代理服务器处理，前端不需要发送
-    apiKey: null
+    // 直接使用NanoGPT API，避免CORS问题需要在浏览器中配置
+    baseUrl: 'https://nano-gpt.com/v1/images/generations',
+    // API密钥需要在前端发送
+    apiKey: 'c4deaf5a-eedd-4138-94e2-e2e6e299a22d'
 };
 
 // DOM元素
@@ -295,60 +295,88 @@ async function generateImage() {
         resultGrid.className = 'result-grid';
         elements.resultContent.appendChild(resultGrid);
 
-        // 构建一次性请求数据
-        const requestData = buildRequestData(prompt);
-        console.log(`🎯 发送一次性请求，生成 ${numImages} 张图片...`);
+        // 如果只需要生成1张图片，直接发送请求
+        if (numImages === 1) {
+            const requestData = buildRequestData(prompt);
+            console.log(`🎯 发送单张图片请求...`);
+            
+            // 发送一次性请求
+            const response = await callImageGenerationAPI(requestData);
+            
+            // 提取所有图片
+            let images = extractImagesFromResponse(response);
+            console.log(`✅ 收到响应，解析到 ${images.length} 张图片`);
 
-        // 发送一次性请求
-        const response = await callImageGenerationAPI(requestData);
-        
-        // 提取所有图片
-        let images = extractImagesFromResponse(response);
-        console.log(`✅ 收到响应，解析到 ${images.length} 张图片`);
-
-        if (images.length === 0) {
-            throw new Error('API返回的数据中未找到图片');
-        }
-
-        // 如果返回的图片数量少于目标数量，可能需要补充请求
-        if (images.length < numImages) {
-            console.log(`ℹ️ 后端仅返回 ${images.length}/${numImages} 张图片`);
-            // 这里可以添加补充逻辑，但为了简单起见，我们只显示返回的图片
-        }
-
-        // 实时显示每张图片
-        let completed = 0;
-        const total = Math.min(images.length, numImages);
-        
-        for (let i = 0; i < total; i++) {
+            if (images.length === 0) {
+                throw new Error('API返回的数据中未找到图片');
+            }
+            
+            // 显示图片
+            displayImagesSequentially(images, numImages, progressContainer, resultGrid);
+        } else {
+            // 生成多张图片时，使用实时显示方式
+            console.log(`🎯 发送实时并发请求，生成 ${numImages} 张图片...`);
+            
+            const baseRequestData = buildRequestData(prompt);
+            // 修改为单张图片请求
+            baseRequestData.n = 1;
+            baseRequestData.num_images = 1;
+            baseRequestData.numImages = 1;
+            
+            // 创建进度跟踪器
+            let completedCount = 0;
+            let completedRequests = 0;
+            
+            // 创建所有请求的Promise数组
+            const requests = Array(numImages).fill().map((_, index) =>
+                callImageGenerationAPI({...baseRequestData})
+                    .then(response => {
+                        completedRequests++;
+                        console.log(`✅ 收到第 ${completedRequests} 个响应`);
+                        
+                        // 提取图片并实时显示
+                        const extracted = extractImagesFromResponse(response);
+                        console.log(`响应 ${index + 1}: 解析到 ${extracted.length} 张图片`);
+                        
+                        if (extracted.length > 0) {
+                            // 立即显示图片，而不是等待所有响应
+                            displayImagesSequentially(extracted, 1, progressContainer, resultGrid, completedCount);
+                            completedCount += extracted.length;
+                        }
+                        
+                        return { response, index };
+                    })
+                    .catch(error => {
+                        completedRequests++;
+                        console.error(`❌ 第 ${index + 1} 个请求失败:`, error);
+                        
+                        // 显示错误信息
+                        const errorElement = document.createElement('div');
+                        errorElement.className = 'image-error';
+                        errorElement.innerHTML = `
+                            <div class="error-icon">❌</div>
+                            <div class="error-text">第 ${index + 1} 张图片生成失败: ${error.message}</div>
+                        `;
+                        resultGrid.appendChild(errorElement);
+                        
+                        return { error, index };
+                    })
+            );
+            
             try {
-                // 模拟实时显示效果（每张图片显示间隔0.5秒）
-                await new Promise(resolve => setTimeout(resolve, 500));
+                // 等待所有请求完成（但图片已经实时显示）
+                await Promise.all(requests);
+                console.log(`✅ 所有请求完成，共 ${completedRequests} 个请求`);
                 
-                // 更新进度
-                completed++;
-                const progressPercent = (completed / total) * 100;
-                updateProgressBar(progressContainer, completed, total);
-                
-                // 显示当前图片
-                displaySingleImage(images[i], completed, resultGrid);
-                console.log(`✅ 显示第 ${completed} 张图片`);
+                // 更新最终进度到100%
+                updateProgressBar(progressContainer, numImages, numImages);
                 
             } catch (error) {
-                console.error(`❌ 显示第 ${i + 1} 张图片失败:`, error);
-                const errorElement = document.createElement('div');
-                errorElement.className = 'image-error';
-                errorElement.innerHTML = `
-                    <div class="error-icon">❌</div>
-                    <div class="error-text">第 ${i + 1} 张图片显示失败: ${error.message}</div>
-                `;
-                resultGrid.appendChild(errorElement);
+                console.error('请求处理过程中发生错误:', error);
+                throw new Error(`生成图片时发生错误: ${error.message}`);
             }
         }
 
-        // 更新进度条到100%
-        updateProgressBar(progressContainer, total, total);
-        console.log(`✅ 图片生成完成: ${completed}/${total} 张图片成功显示`);
 
     } catch (error) {
         console.error('生成图像失败:', error);
@@ -371,6 +399,39 @@ function updateProgressBar(container, current, total) {
     if (progressFill) {
         progressFill.style.width = `${(current/total)*100}%`;
     }
+}
+
+// 顺序显示图片（支持实时显示）
+async function displayImagesSequentially(images, targetCount, progressContainer, resultGrid, startIndex = 0) {
+    let completed = startIndex;
+    const total = Math.min(images.length, targetCount) + startIndex;
+    
+    for (let i = 0; i < images.length; i++) {
+        try {
+            // 模拟实时显示效果（每张图片显示间隔0.5秒）
+            await new Promise(resolve => setTimeout(resolve, 500));
+            
+            // 更新进度
+            completed++;
+            updateProgressBar(progressContainer, completed, total);
+            
+            // 显示当前图片
+            displaySingleImage(images[i], completed, resultGrid);
+            console.log(`✅ 显示第 ${completed} 张图片`);
+            
+        } catch (error) {
+            console.error(`❌ 显示第 ${completed + 1} 张图片失败:`, error);
+            const errorElement = document.createElement('div');
+            errorElement.className = 'image-error';
+            errorElement.innerHTML = `
+                <div class="error-icon">❌</div>
+                <div class="error-text">第 ${completed + 1} 张图片显示失败: ${error.message}</div>
+            `;
+            resultGrid.appendChild(errorElement);
+        }
+    }
+    
+    console.log(`✅ 图片显示完成: ${completed}/${total} 张图片成功显示`);
 }
 
 // 构建请求数据
