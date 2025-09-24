@@ -314,8 +314,8 @@ async function generateImage() {
             // 显示图片
             displayImagesSequentially(images, numImages, progressContainer, resultGrid);
         } else {
-            // 生成多张图片时，使用顺序发送请求方式
-            console.log(`🎯 顺序发送请求，生成 ${numImages} 张图片，每0.1秒发送一次...`);
+            // 生成多张图片时，使用顺序发送请求方式，增加间隔时间
+            console.log(`🎯 顺序发送请求，生成 ${numImages} 张图片，每1秒发送一次...`);
             
             const baseRequestData = buildRequestData(prompt);
             // 修改为单张图片请求
@@ -329,13 +329,13 @@ async function generateImage() {
             const allRequests = [];
             
             try {
-                // 顺序发送请求，每隔0.1秒发送一个
+                // 顺序发送请求，增加间隔时间到1秒，避免服务器过载
                 for (let i = 0; i < numImages; i++) {
-                    await new Promise(resolve => setTimeout(resolve, 100)); // 0.1秒间隔
+                    await new Promise(resolve => setTimeout(resolve, 500)); // 增加到1秒间隔
                     
                     console.log(`📤 发送第 ${i + 1} 个请求...`);
                     
-                    const request = callImageGenerationAPI({...baseRequestData})
+                    const request = callImageGenerationAPI({...baseRequestData}, 10, 2000) // 3次重试，初始延迟2秒
                         .then(response => {
                             completedRequests++;
                             console.log(`✅ 收到第 ${completedRequests} 个响应`);
@@ -354,14 +354,15 @@ async function generateImage() {
                         })
                         .catch(error => {
                             completedRequests++;
-                            console.error(`❌ 第 ${i + 1} 个请求失败:`, error);
+                            console.error(`❌ 第 ${i + 1} 个请求失败:`, error.message);
                             
-                            // 显示错误信息
+                            // 显示更详细的错误信息
                             const errorElement = document.createElement('div');
                             errorElement.className = 'image-error';
                             errorElement.innerHTML = `
                                 <div class="error-icon">❌</div>
                                 <div class="error-text">第 ${i + 1} 张图片生成失败: ${error.message}</div>
+                                <div class="error-detail">服务器可能繁忙，请稍后重试</div>
                             `;
                             resultGrid.appendChild(errorElement);
                             
@@ -535,8 +536,8 @@ function extractImagesFromResponse(response) {
     return [];
 }
 
-// 调用API
-async function callImageGenerationAPI(requestData) {
+// 调用API（带重试机制）
+async function callImageGenerationAPI(requestData, retries = 3, delay = 1000) {
     const headers = {
         'Content-Type': 'application/json'
     };
@@ -546,18 +547,42 @@ async function callImageGenerationAPI(requestData) {
         headers['Authorization'] = `Bearer ${API_CONFIG.apiKey}`;
     }
 
-    const response = await fetch(API_CONFIG.baseUrl, {
-        method: 'POST',
-        headers: headers,
-        body: JSON.stringify(requestData)
-    });
+    let lastError;
+    
+    for (let attempt = 1; attempt <= retries; attempt++) {
+        try {
+            const response = await fetch(API_CONFIG.baseUrl, {
+                method: 'POST',
+                headers: headers,
+                body: JSON.stringify(requestData)
+            });
 
-    if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.message || `HTTP错误: ${response.status}`);
+            if (response.status === 503) {
+                // 服务器过载，等待一段时间后重试
+                console.log(`⚠️ 服务器繁忙 (503)，等待 ${delay}ms 后重试 (${attempt}/${retries})`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+                delay *= 2; // 指数退避
+                continue;
+            }
+
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(errorData.message || `HTTP错误: ${response.status}`);
+            }
+
+            return await response.json();
+            
+        } catch (error) {
+            lastError = error;
+            if (attempt < retries) {
+                console.log(`⚠️ 请求失败，${delay}ms 后重试 (${attempt}/${retries}):`, error.message);
+                await new Promise(resolve => setTimeout(resolve, delay));
+                delay *= 2; // 指数退避
+            }
+        }
     }
 
-    return await response.json();
+    throw lastError || new Error('API调用失败');
 }
 
 // 显示单个图片
