@@ -314,8 +314,8 @@ async function generateImage() {
             // 显示图片
             displayImagesSequentially(images, numImages, progressContainer, resultGrid);
         } else {
-            // 生成多张图片时，使用实时显示方式
-            console.log(`🎯 发送实时并发请求，生成 ${numImages} 张图片...`);
+            // 生成多张图片时，使用顺序发送请求方式
+            console.log(`🎯 顺序发送请求，生成 ${numImages} 张图片，每0.1秒发送一次...`);
             
             const baseRequestData = buildRequestData(prompt);
             // 修改为单张图片请求
@@ -326,46 +326,53 @@ async function generateImage() {
             // 创建进度跟踪器
             let completedCount = 0;
             let completedRequests = 0;
-            
-            // 创建所有请求的Promise数组
-            const requests = Array(numImages).fill().map((_, index) =>
-                callImageGenerationAPI({...baseRequestData})
-                    .then(response => {
-                        completedRequests++;
-                        console.log(`✅ 收到第 ${completedRequests} 个响应`);
-                        
-                        // 提取图片并实时显示
-                        const extracted = extractImagesFromResponse(response);
-                        console.log(`响应 ${index + 1}: 解析到 ${extracted.length} 张图片`);
-                        
-                        if (extracted.length > 0) {
-                            // 立即显示图片，而不是等待所有响应
-                            displayImagesSequentially(extracted, 1, progressContainer, resultGrid, completedCount);
-                            completedCount += extracted.length;
-                        }
-                        
-                        return { response, index };
-                    })
-                    .catch(error => {
-                        completedRequests++;
-                        console.error(`❌ 第 ${index + 1} 个请求失败:`, error);
-                        
-                        // 显示错误信息
-                        const errorElement = document.createElement('div');
-                        errorElement.className = 'image-error';
-                        errorElement.innerHTML = `
-                            <div class="error-icon">❌</div>
-                            <div class="error-text">第 ${index + 1} 张图片生成失败: ${error.message}</div>
-                        `;
-                        resultGrid.appendChild(errorElement);
-                        
-                        return { error, index };
-                    })
-            );
+            const allRequests = [];
             
             try {
-                // 等待所有请求完成（但图片已经实时显示）
-                await Promise.all(requests);
+                // 顺序发送请求，每隔0.1秒发送一个
+                for (let i = 0; i < numImages; i++) {
+                    await new Promise(resolve => setTimeout(resolve, 100)); // 0.1秒间隔
+                    
+                    console.log(`📤 发送第 ${i + 1} 个请求...`);
+                    
+                    const request = callImageGenerationAPI({...baseRequestData})
+                        .then(response => {
+                            completedRequests++;
+                            console.log(`✅ 收到第 ${completedRequests} 个响应`);
+                            
+                            // 提取图片并实时显示
+                            const extracted = extractImagesFromResponse(response);
+                            console.log(`响应 ${i + 1}: 解析到 ${extracted.length} 张图片`);
+                            
+                            if (extracted.length > 0) {
+                                // 立即显示图片，而不是等待所有响应
+                                displayImagesSequentially(extracted, 1, progressContainer, resultGrid, completedCount);
+                                completedCount += extracted.length;
+                            }
+                            
+                            return { response, index: i };
+                        })
+                        .catch(error => {
+                            completedRequests++;
+                            console.error(`❌ 第 ${i + 1} 个请求失败:`, error);
+                            
+                            // 显示错误信息
+                            const errorElement = document.createElement('div');
+                            errorElement.className = 'image-error';
+                            errorElement.innerHTML = `
+                                <div class="error-icon">❌</div>
+                                <div class="error-text">第 ${i + 1} 张图片生成失败: ${error.message}</div>
+                            `;
+                            resultGrid.appendChild(errorElement);
+                            
+                            return { error, index: i };
+                        });
+                    
+                    allRequests.push(request);
+                }
+                
+                // 等待所有请求完成
+                await Promise.all(allRequests);
                 console.log(`✅ 所有请求完成，共 ${completedRequests} 个请求`);
                 
                 // 更新最终进度到100%
