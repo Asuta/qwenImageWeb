@@ -60,6 +60,9 @@ function initializeEventListeners() {
 
     // 生成按钮
     elements.generateBtn.addEventListener('click', generateImage);
+    
+    // 生成数量输入验证
+    elements.numImages.addEventListener('input', validateNumImages);
 }
 
 // 切换高级设置
@@ -257,6 +260,14 @@ async function generateImage() {
         return;
     }
     
+    // 验证生成数量
+    const numImages = parseInt(elements.numImages.value);
+    if (isNaN(numImages) || numImages < 1 || numImages > 20) {
+        showError('生成数量必须是1-20之间的整数');
+        elements.numImages.focus();
+        return;
+    }
+    
     // 禁用按钮并显示加载状态
     elements.generateBtn.disabled = true;
     setFormDisabled(true);
@@ -265,31 +276,79 @@ async function generateImage() {
     hideResult();
     
     try {
+        // 清空结果区域并显示结果
+        elements.resultContent.innerHTML = '';
+        showResult();
+        
+        // 创建进度显示和结果容器
+        const progressContainer = document.createElement('div');
+        progressContainer.className = 'progress-container';
+        progressContainer.innerHTML = `
+            <div class="progress-info">正在显示第 <span class="current-progress">0</span> / ${numImages} 张图片</div>
+            <div class="progress-bar">
+                <div class="progress-fill" style="width: 0%"></div>
+            </div>
+        `;
+        elements.resultContent.appendChild(progressContainer);
+
+        const resultGrid = document.createElement('div');
+        resultGrid.className = 'result-grid';
+        elements.resultContent.appendChild(resultGrid);
+
+        // 构建一次性请求数据
         const requestData = buildRequestData(prompt);
+        console.log(`🎯 发送一次性请求，生成 ${numImages} 张图片...`);
+
+        // 发送一次性请求
         const response = await callImageGenerationAPI(requestData);
-
-        // 兼容不同提供商返回结构，提取所有图片
+        
+        // 提取所有图片
         let images = extractImagesFromResponse(response);
-        console.log(`✅ 解析到图片数量: ${images.length}`);
+        console.log(`✅ 收到响应，解析到 ${images.length} 张图片`);
 
-        // 如果后端未支持批量，自动补齐到目标数量
-        const desired = parseInt(elements.numImages.value);
-        if (images.length < desired) {
-            console.log(`ℹ️ 后端仅返回 ${images.length}/${desired}，将通过前端补齐...`);
-            const remain = Math.max(0, desired - images.length);
-            const extraBodies = Array.from({ length: remain }, () => ({ ...requestData, n: 1, num_images: 1, numImages: 1 }));
-            const extraCalls = extraBodies.map(body => callImageGenerationAPI(body).then(extractImagesFromResponse).catch(err => { console.warn('补齐请求失败:', err); return []; }));
-            const extraResults = await Promise.all(extraCalls);
-            const extraImages = extraResults.flat();
-            images = images.concat(extraImages).slice(0, desired);
-            console.log(`✅ 最终将展示图片数量: ${images.length}`);
-        }
-
-        if (images.length > 0) {
-            displayResults(images, response);
-        } else {
+        if (images.length === 0) {
             throw new Error('API返回的数据中未找到图片');
         }
+
+        // 如果返回的图片数量少于目标数量，可能需要补充请求
+        if (images.length < numImages) {
+            console.log(`ℹ️ 后端仅返回 ${images.length}/${numImages} 张图片`);
+            // 这里可以添加补充逻辑，但为了简单起见，我们只显示返回的图片
+        }
+
+        // 实时显示每张图片
+        let completed = 0;
+        const total = Math.min(images.length, numImages);
+        
+        for (let i = 0; i < total; i++) {
+            try {
+                // 模拟实时显示效果（每张图片显示间隔0.5秒）
+                await new Promise(resolve => setTimeout(resolve, 500));
+                
+                // 更新进度
+                completed++;
+                const progressPercent = (completed / total) * 100;
+                updateProgressBar(progressContainer, completed, total);
+                
+                // 显示当前图片
+                displaySingleImage(images[i], completed, resultGrid);
+                console.log(`✅ 显示第 ${completed} 张图片`);
+                
+            } catch (error) {
+                console.error(`❌ 显示第 ${i + 1} 张图片失败:`, error);
+                const errorElement = document.createElement('div');
+                errorElement.className = 'image-error';
+                errorElement.innerHTML = `
+                    <div class="error-icon">❌</div>
+                    <div class="error-text">第 ${i + 1} 张图片显示失败: ${error.message}</div>
+                `;
+                resultGrid.appendChild(errorElement);
+            }
+        }
+
+        // 更新进度条到100%
+        updateProgressBar(progressContainer, total, total);
+        console.log(`✅ 图片生成完成: ${completed}/${total} 张图片成功显示`);
 
     } catch (error) {
         console.error('生成图像失败:', error);
@@ -298,6 +357,19 @@ async function generateImage() {
         elements.generateBtn.disabled = false;
         setFormDisabled(false);
         hideLoading();
+    }
+}
+
+// 更新进度条
+function updateProgressBar(container, current, total) {
+    const progressText = container.querySelector('.current-progress');
+    const progressFill = container.querySelector('.progress-fill');
+    
+    if (progressText) {
+        progressText.textContent = current;
+    }
+    if (progressFill) {
+        progressFill.style.width = `${(current/total)*100}%`;
     }
 }
 
@@ -310,10 +382,13 @@ function buildRequestData(prompt) {
         actualSize = autoOption?.dataset.actualSize || '512x512'; // 默认值
     }
 
+    // 使用验证过的生成数量
+    const numImages = parseInt(elements.numImages.value);
+
     const data = {
         model: elements.model.value,
         prompt: prompt,
-        n: parseInt(elements.numImages.value),
+        n: numImages,
         size: actualSize,
         response_format: 'url',
         guidance_scale: parseFloat(elements.guidanceScale.value),
@@ -417,41 +492,31 @@ async function callImageGenerationAPI(requestData) {
     return await response.json();
 }
 
-// 显示结果
+// 显示单个图片
+function displaySingleImage(image, index, resultGrid) {
+    const resultItem = document.createElement('div');
+    resultItem.className = 'result-item';
+    
+    const imageUrl = image.url || `data:image/png;base64,${image.b64_json}`;
+    
+    resultItem.innerHTML = `
+        <div class="image-status">
+            <span class="status-indicator">✅</span>
+            <span class="status-text">第 ${index} 张图片生成完成</span>
+        </div>
+        <img src="${imageUrl}" alt="生成的图像 ${index}" loading="lazy">
+        <button class="download-btn" onclick="downloadImage('${imageUrl}', '生成图像_${index}')">
+            <i class="fas fa-download"></i> 下载
+        </button>
+    `;
+    
+    resultGrid.appendChild(resultItem);
+}
+
+// 显示结果（保留函数，但已不再使用，用于兼容性）
 function displayResults(images, responseData) {
-    const resultGrid = document.createElement('div');
-    resultGrid.className = 'result-grid';
-    
-    images.forEach((image, index) => {
-        const resultItem = document.createElement('div');
-        resultItem.className = 'result-item';
-        
-        const imageUrl = image.url || `data:image/png;base64,${image.b64_json}`;
-        
-        resultItem.innerHTML = `
-            <img src="${imageUrl}" alt="生成的图像 ${index + 1}" loading="lazy">
-            <button class="download-btn" onclick="downloadImage('${imageUrl}', '生成图像_${index + 1}')">
-                <i class="fas fa-download"></i> 下载
-            </button>
-        `;
-        
-        resultGrid.appendChild(resultItem);
-    });
-    
-    // 添加API信息
-    if (responseData.cost !== undefined) {
-        const infoDiv = document.createElement('div');
-        infoDiv.className = 'api-info';
-        infoDiv.innerHTML = `
-            <p><strong>消耗费用:</strong> ${responseData.cost}</p>
-            <p><strong>剩余余额:</strong> ${responseData.remainingBalance}</p>
-        `;
-        resultGrid.appendChild(infoDiv);
-    }
-    
-    elements.resultContent.innerHTML = '';
-    elements.resultContent.appendChild(resultGrid);
-    showResult();
+    // 此函数已不再使用，但保留用于兼容性
+    console.warn('displayResults函数已不再使用，请使用displaySingleImage');
 }
 
 // 下载图片
@@ -535,4 +600,18 @@ function setFormDisabled(disabled) {
 function setPromptExample(element) {
     elements.prompt.value = element.textContent;
     elements.prompt.focus();
+}
+
+// 验证生成数量
+function validateNumImages() {
+    const numImages = parseInt(elements.numImages.value);
+    const input = elements.numImages;
+    
+    if (isNaN(numImages) || numImages < 1 || numImages > 20) {
+        input.style.borderColor = '#ff4444';
+        input.setAttribute('title', '请输入1-20之间的整数');
+    } else {
+        input.style.borderColor = '';
+        input.removeAttribute('title');
+    }
 }
